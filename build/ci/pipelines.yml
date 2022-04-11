@@ -2,8 +2,8 @@ resources:
   - name: builder_node14_bitbucket
     type: GitRepo
     configuration:
-      path: store/builder-node14
-      gitProvider: JFrog_bitbucket
+      path: RjSH1/builder-node14
+      gitProvider: myGithub
       branches:
         include: ^{{gitBranch}}$
 
