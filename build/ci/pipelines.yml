@@ -1,0 +1,90 @@
+resources:
+  - name: builder_node14_bitbucket
+    type: GitRepo
+    configuration:
+      path: store/builder-node14
+      gitProvider: JFrog_bitbucket
+      branches:
+        include: ^{{gitBranch}}$
+
+  - name: builder_node14_docker_build_info
+    type: BuildInfo
+    configuration:
+      sourceArtifactory: entplus_deployer
+      buildName: ba_builder_node14
+      buildNumber: ${run_number}
+
+  - name: builder_node14_jfrog_io_docker_image
+    type: Image
+    configuration:
+      registry: art_jfrog_io
+      sourceRepository: art-docker-dev-local
+      imageName: art.jfrog.io/jfrog/ba/ci/builder-node14
+      imageTag: ${VERSION}
+
+pipelines:
+  - name: builder_node14_docker
+    steps:
+      - name: prepare
+        type: Bash
+        configuration:
+          affinityGroup: dbp_group
+          inputResources:
+            - name: builder_node14_bitbucket
+              trigger: true
+        execution:
+          onExecute:
+            - add_run_variables VERSION=$(date +"%Y.%-m").$run_number$([ "{{gitBranch}}" = "master" ] && echo "" || echo "-{{gitBranch}}")
+            - echo "VERSION '${VERSION}'"
+
+      - name: docker_build
+        type: DockerBuild
+        configuration:
+          affinityGroup: dbp_group
+          dockerFileLocation: .
+          dockerFileName: Dockerfile
+          dockerImageName: art.jfrog.io/jfrog/ba/ci/builder-node14
+          dockerImageTag: ${VERSION}
+          inputSteps:
+            - name: prepare
+          inputResources:
+            - name: builder_node14_bitbucket
+          integrations:
+            - name: entplus_jfrog_io_docker
+            - name: entplus_deployer
+          environmentVariables:
+            build_number:
+              default: $run_number
+
+      - name: docker_push
+        type: DockerPush
+        configuration:
+          forceXrayScan: true
+          autoPublishBuildInfo: true
+          affinityGroup: dbp_group
+          targetRepository: art-docker-dev-local
+          integrations:
+            - name: entplus_jfrog_io_docker
+            - name: entplus_deployer
+            - name: ba_bitbucket_ssh_token
+          inputSteps:
+            - name: docker_build
+          inputResources:
+            - name: builder_node14_bitbucket
+          outputResources:
+            - name: builder_node14_jfrog_io_docker_image
+            - name: builder_node14_docker_build_info
+        execution:
+          onStart:
+            - |
+              if [ "{{gitBranch}}" = "master" ]; then
+                echo "Branch is 'master', creating Git tag '${VERSION}'"
+                pushd ${res_builder_node14_bitbucket_resourcePath}
+                git config core.sshCommand "ssh -i ~/.ssh/ba_bitbucket_ssh_token -F /dev/null"
+                git remote set-url origin ssh://git@git.jfrog.info/store/builder-node14.git
+                git tag ${VERSION}
+                ssh-keyscan -H git.jfrog.info >> /root/.ssh/known_hosts
+                git push origin ${VERSION}
+              else
+                echo "Branch is '{{gitBranch}}' (not 'master'), not creating Git tag"
+              fi
